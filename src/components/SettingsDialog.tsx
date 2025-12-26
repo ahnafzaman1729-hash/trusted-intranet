@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Settings, Key, Server, Copy, Check, Shield, Trash2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Settings, Key, Server, Copy, Check, Shield, Trash2, Globe, Radio } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useChatContext } from '@/contexts/ChatContext';
 import { toast } from 'sonner';
+import { OPEN_SERVER_CONFIG } from '@/lib/protocol';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -32,11 +33,21 @@ interface SettingsDialogProps {
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { identity, serverConfig, configureServer, getFingerprint, getFingerprintHex } = useChatContext();
+  const [serverType, setServerType] = useState<'open' | 'custom'>(serverConfig?.isOpenServer ? 'open' : 'custom');
   const [host, setHost] = useState(serverConfig?.host || '');
   const [port, setPort] = useState(serverConfig?.port?.toString() || '8443');
   const [useTLS, setUseTLS] = useState(serverConfig?.useTLS ?? true);
   const [copied, setCopied] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  useEffect(() => {
+    if (serverConfig) {
+      setServerType(serverConfig.isOpenServer ? 'open' : 'custom');
+      setHost(serverConfig.host || '');
+      setPort(serverConfig.port?.toString() || '8443');
+      setUseTLS(serverConfig.useTLS ?? true);
+    }
+  }, [serverConfig]);
 
   const fingerprint = identity ? getFingerprint(identity.identityKeyPair.publicKey) : '';
   const fingerprintHex = identity ? getFingerprintHex(identity.identityKeyPair.publicKey) : '';
@@ -49,11 +60,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   const handleSaveServer = async () => {
     try {
-      await configureServer({
-        host: host.trim(),
-        port: parseInt(port, 10),
-        useTLS
-      });
+      if (serverType === 'open') {
+        await configureServer({
+          ...OPEN_SERVER_CONFIG,
+          isOpenServer: true
+        });
+      } else {
+        await configureServer({
+          host: host.trim(),
+          port: parseInt(port, 10),
+          useTLS,
+          isOpenServer: false
+        });
+      }
       toast.success('Server settings saved');
     } catch (error) {
       toast.error('Failed to save settings');
@@ -144,41 +163,87 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </TabsContent>
             
             <TabsContent value="server" className="space-y-4 pt-4">
-              <div className="space-y-2">
-                <Label htmlFor="settings-host">Server Address</Label>
-                <Input
-                  id="settings-host"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  placeholder="192.168.1.100 or chat.local"
-                  className="bg-input font-mono"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="settings-port">Port</Label>
-                <Input
-                  id="settings-port"
-                  value={port}
-                  onChange={(e) => setPort(e.target.value)}
-                  placeholder="8443"
-                  className="bg-input font-mono"
-                />
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label htmlFor="settings-tls">Use TLS</Label>
-                <Switch
-                  id="settings-tls"
-                  checked={useTLS}
-                  onCheckedChange={setUseTLS}
-                />
+              {/* Server Type Selection */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setServerType('open')}
+                  className={`p-3 rounded-lg border-2 transition-all text-left ${
+                    serverType === 'open'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border bg-muted/50 hover:border-muted-foreground/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-primary" />
+                    <span className="font-medium text-sm">Open Server</span>
+                  </div>
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={() => setServerType('custom')}
+                  className={`p-3 rounded-lg border-2 transition-all text-left ${
+                    serverType === 'custom'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border bg-muted/50 hover:border-muted-foreground/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-primary" />
+                    <span className="font-medium text-sm">Custom Server</span>
+                  </div>
+                </button>
               </div>
 
-              {!useTLS && (
-                <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 text-sm text-warning">
-                  Without TLS, connection metadata is visible on the network.
+              {serverType === 'open' && (
+                <div className="p-3 rounded-lg bg-primary/10 border border-primary/20 text-sm">
+                  <p className="text-foreground font-medium">Demo Server</p>
+                  <p className="text-muted-foreground text-xs font-mono mt-1">
+                    {OPEN_SERVER_CONFIG.host}:{OPEN_SERVER_CONFIG.port}
+                  </p>
                 </div>
+              )}
+
+              {serverType === 'custom' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="settings-host">Server Address</Label>
+                    <Input
+                      id="settings-host"
+                      value={host}
+                      onChange={(e) => setHost(e.target.value)}
+                      placeholder="192.168.1.100 or chat.local"
+                      className="bg-input font-mono"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="settings-port">Port</Label>
+                    <Input
+                      id="settings-port"
+                      value={port}
+                      onChange={(e) => setPort(e.target.value)}
+                      placeholder="8443"
+                      className="bg-input font-mono"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="settings-tls">Use TLS</Label>
+                    <Switch
+                      id="settings-tls"
+                      checked={useTLS}
+                      onCheckedChange={setUseTLS}
+                    />
+                  </div>
+
+                  {!useTLS && (
+                    <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 text-sm text-warning">
+                      Without TLS, connection metadata is visible on the network.
+                    </div>
+                  )}
+                </>
               )}
 
               <Button onClick={handleSaveServer} className="w-full">
