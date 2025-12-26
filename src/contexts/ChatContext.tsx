@@ -64,6 +64,7 @@ interface ChatContextType {
   configureServer: (config: ServerConfig) => Promise<void>;
   connectToServer: () => Promise<void>;
   addContact: (username: string) => Promise<Contact | null>;
+  addContactManual: (username: string, publicKey: string) => Promise<Contact | null>;
   setActiveContact: (contact: Contact | null) => void;
   sendMessage: (content: string) => Promise<void>;
   verifyContact: (contactId: string) => Promise<void>;
@@ -284,6 +285,43 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return contact;
   }, [identity]);
 
+  const addContactManual = useCallback(async (username: string, publicKey: string): Promise<Contact | null> => {
+    const contact: Contact = {
+      id: uuidv4(),
+      username,
+      identityKey: publicKey,
+      verified: false
+    };
+    
+    await saveContact(contact);
+    setContacts(prev => [...prev, contact]);
+    
+    // Establish session
+    if (identity) {
+      const conversationId = generateConversationId(identity.id, contact.id);
+      const sharedKey = performKeyExchange(
+        identity.identityKeyPair.privateKey,
+        contact.identityKey
+      );
+      sessionKeys.current.set(conversationId, sharedKey);
+      
+      const session: SessionState = {
+        conversationId,
+        contactId: contact.id,
+        rootKey: sharedKey,
+        sendingChainKey: sharedKey,
+        receivingChainKey: sharedKey,
+        sendingRatchetKey: identity.identityKeyPair,
+        receivingRatchetKey: contact.identityKey,
+        messageNumber: 0,
+        previousChainLength: 0
+      };
+      await saveSession(session);
+    }
+    
+    return contact;
+  }, [identity]);
+
   const sendMessage = useCallback(async (content: string) => {
     if (!identity || !activeContact) return;
     
@@ -412,6 +450,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     configureServer,
     connectToServer,
     addContact,
+    addContactManual,
     setActiveContact,
     sendMessage,
     verifyContact,
