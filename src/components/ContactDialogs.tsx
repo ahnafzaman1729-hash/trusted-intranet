@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Search, Loader2, ShieldCheck, Copy, Check } from 'lucide-react';
+import { Search, Loader2, ShieldCheck, Copy, Check, UserPlus, Key } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -13,6 +14,7 @@ import {
 import { useChatContext } from '@/contexts/ChatContext';
 import { Contact } from '@/lib/protocol';
 import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
 
 interface AddContactDialogProps {
   open: boolean;
@@ -20,8 +22,10 @@ interface AddContactDialogProps {
 }
 
 export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) {
-  const { addContact, connected } = useChatContext();
+  const { addContact, addContactManual, connected } = useChatContext();
   const [username, setUsername] = useState('');
+  const [manualUsername, setManualUsername] = useState('');
+  const [manualPublicKey, setManualPublicKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -47,49 +51,128 @@ export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) 
     }
   };
 
+  const handleManualAdd = async () => {
+    if (!manualUsername.trim() || !manualPublicKey.trim()) {
+      setError('Username and public key are required');
+      return;
+    }
+    
+    setLoading(true);
+    setError('');
+    
+    try {
+      const contact = await addContactManual(manualUsername.trim(), manualPublicKey.trim());
+      if (contact) {
+        toast.success(`Added ${contact.username} to contacts`);
+        onOpenChange(false);
+        setManualUsername('');
+        setManualPublicKey('');
+      } else {
+        setError('Failed to add contact');
+      }
+    } catch (err) {
+      setError('Invalid public key format');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add Contact</DialogTitle>
           <DialogDescription>
-            Search for a user by their username to start a secure conversation.
+            Add a contact by searching the server or manually entering their details.
           </DialogDescription>
         </DialogHeader>
         
-        <div className="space-y-4 pt-4">
-          <div className="space-y-2">
-            <Label htmlFor="search-username">Username</Label>
-            <div className="flex gap-2">
+        <Tabs defaultValue="manual" className="pt-2">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="manual">
+              <Key className="w-4 h-4 mr-2" />
+              Manual
+            </TabsTrigger>
+            <TabsTrigger value="server" disabled={!connected}>
+              <Search className="w-4 h-4 mr-2" />
+              Server
+            </TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="manual" className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="manual-username">Contact Username</Label>
               <Input
-                id="search-username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                placeholder="Enter username..."
+                id="manual-username"
+                value={manualUsername}
+                onChange={(e) => setManualUsername(e.target.value)}
+                placeholder="Enter their username"
                 className="bg-input"
-                disabled={!connected}
               />
-              <Button onClick={handleSearch} disabled={loading || !connected}>
-                {loading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Search className="w-4 h-4" />
-                )}
-              </Button>
             </div>
-          </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="manual-key">Their Public Key</Label>
+              <Input
+                id="manual-key"
+                value={manualPublicKey}
+                onChange={(e) => setManualPublicKey(e.target.value)}
+                placeholder="Paste their public key..."
+                className="bg-input font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">
+                Ask your contact to share their public key from Settings → Identity
+              </p>
+            </div>
+            
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
+            
+            <Button onClick={handleManualAdd} disabled={loading} className="w-full">
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : (
+                <UserPlus className="w-4 h-4 mr-2" />
+              )}
+              Add Contact
+            </Button>
+          </TabsContent>
           
-          {!connected && (
-            <p className="text-sm text-warning">
-              Connect to server to search for contacts
-            </p>
-          )}
-          
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
-        </div>
+          <TabsContent value="server" className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="search-username">Username</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="search-username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  placeholder="Enter username..."
+                  className="bg-input"
+                  disabled={!connected}
+                />
+                <Button onClick={handleSearch} disabled={loading || !connected}>
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Search className="w-4 h-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+            
+            {!connected && (
+              <p className="text-sm text-warning">
+                Connect to server to search for contacts
+              </p>
+            )}
+            
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );
