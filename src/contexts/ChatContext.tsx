@@ -402,6 +402,19 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         });
       }
     } else {
+      // In offline/local mode, mark as sent locally for testing
+      storedMessage.status = MessageStatus.SENT;
+      await saveMessage(storedMessage);
+      setMessages(prev => {
+        const newMap = new Map(prev);
+        const convMessages = newMap.get(conversationId) || [];
+        newMap.set(conversationId, convMessages.map(m => 
+          m.id === storedMessage.id ? storedMessage : m
+        ));
+        return newMap;
+      });
+      
+      // Also queue for when server becomes available
       await addToOutbox({
         id: envelope.messageId,
         envelope,
