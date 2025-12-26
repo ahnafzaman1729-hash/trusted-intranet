@@ -1,16 +1,18 @@
 import { useState } from 'react';
-import { Shield, Key, Server, ArrowRight, Loader2, Lock } from 'lucide-react';
+import { Shield, Key, Server, ArrowRight, Loader2, Lock, Globe, Radio } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useChatContext } from '@/contexts/ChatContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { OPEN_SERVER_CONFIG } from '@/lib/protocol';
 
 export function OnboardingScreen() {
   const { createIdentity, configureServer, connectToServer, identity, serverConfig } = useChatContext();
   const [step, setStep] = useState<'identity' | 'server' | 'connecting'>('identity');
   const [username, setUsername] = useState('');
+  const [serverType, setServerType] = useState<'open' | 'custom'>('open');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('8443');
   const [useTLS, setUseTLS] = useState(true);
@@ -37,20 +39,28 @@ export function OnboardingScreen() {
   };
 
   const handleConfigureServer = async () => {
-    if (!host.trim()) {
-      setError('Server address is required');
-      return;
-    }
-    
     setLoading(true);
     setError('');
     
     try {
-      await configureServer({
-        host: host.trim(),
-        port: parseInt(port, 10),
-        useTLS
-      });
+      if (serverType === 'open') {
+        await configureServer({
+          ...OPEN_SERVER_CONFIG,
+          isOpenServer: true
+        });
+      } else {
+        if (!host.trim()) {
+          setError('Server address is required');
+          setLoading(false);
+          return;
+        }
+        await configureServer({
+          host: host.trim(),
+          port: parseInt(port, 10),
+          useTLS,
+          isOpenServer: false
+        });
+      }
       setStep('connecting');
       await connectToServer();
     } catch (err) {
@@ -151,48 +161,110 @@ export function OnboardingScreen() {
                 Connect to Server
               </CardTitle>
               <CardDescription>
-                Enter the intranet server address. The server cannot read your messages.
+                Choose an open server for testing or connect to your own intranet server.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="host">Server Address</Label>
-                <Input
-                  id="host"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  placeholder="192.168.1.100 or chat.local"
-                  className="bg-input font-mono"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="port">Port</Label>
-                <Input
-                  id="port"
-                  value={port}
-                  onChange={(e) => setPort(e.target.value)}
-                  placeholder="8443"
-                  className="bg-input font-mono"
-                />
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label htmlFor="tls" className="text-sm">Use TLS (recommended)</Label>
-                <Switch
-                  id="tls"
-                  checked={useTLS}
-                  onCheckedChange={setUseTLS}
-                />
-              </div>
-              
-              {!useTLS && (
-                <div className="p-3 rounded-lg bg-warning/10 border border-warning/30">
-                  <p className="text-xs text-warning">
-                    Without TLS, connection metadata may be visible on the network. 
-                    Message contents remain encrypted.
+              {/* Server Type Selection */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setServerType('open')}
+                  className={`p-4 rounded-lg border-2 transition-all text-left ${
+                    serverType === 'open'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border bg-muted/50 hover:border-muted-foreground/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <Globe className="w-5 h-5 text-primary" />
+                    <span className="font-medium">Open Server</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Demo server for testing. No setup required.
                   </p>
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={() => setServerType('custom')}
+                  className={`p-4 rounded-lg border-2 transition-all text-left ${
+                    serverType === 'custom'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border bg-muted/50 hover:border-muted-foreground/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <Radio className="w-5 h-5 text-primary" />
+                    <span className="font-medium">Custom Server</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Your own intranet server.
+                  </p>
+                </button>
+              </div>
+
+              {/* Open Server Info */}
+              {serverType === 'open' && (
+                <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
+                  <div className="flex items-start gap-2 text-sm">
+                    <Globe className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-foreground font-medium">Demo Server</p>
+                      <p className="text-muted-foreground text-xs mt-1">
+                        {OPEN_SERVER_CONFIG.host}:{OPEN_SERVER_CONFIG.port}
+                      </p>
+                      <p className="text-muted-foreground text-xs mt-1">
+                        Messages are still end-to-end encrypted. The server cannot read them.
+                      </p>
+                    </div>
+                  </div>
                 </div>
+              )}
+
+              {/* Custom Server Fields */}
+              {serverType === 'custom' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="host">Server Address</Label>
+                    <Input
+                      id="host"
+                      value={host}
+                      onChange={(e) => setHost(e.target.value)}
+                      placeholder="192.168.1.100 or chat.local"
+                      className="bg-input font-mono"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="port">Port</Label>
+                    <Input
+                      id="port"
+                      value={port}
+                      onChange={(e) => setPort(e.target.value)}
+                      placeholder="8443"
+                      className="bg-input font-mono"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="tls" className="text-sm">Use TLS (recommended)</Label>
+                    <Switch
+                      id="tls"
+                      checked={useTLS}
+                      onCheckedChange={setUseTLS}
+                    />
+                  </div>
+                  
+                  {!useTLS && (
+                    <div className="p-3 rounded-lg bg-warning/10 border border-warning/30">
+                      <p className="text-xs text-warning">
+                        Without TLS, connection metadata may be visible on the network. 
+                        Message contents remain encrypted.
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
               
               {error && (

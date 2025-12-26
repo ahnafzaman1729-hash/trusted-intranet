@@ -5,6 +5,14 @@ export const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const NONCE_SIZE = 24; // XChaCha20-Poly1305
 export const KEY_SIZE = 32;
 
+// Open/Demo server configuration for testing
+export const OPEN_SERVER_CONFIG = {
+  host: 'demo.securechat.local',
+  port: 8080,
+  useTLS: false,
+  isOpenServer: true
+};
+
 export const FINGERPRINT_WORDS = [
   'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel',
   'india', 'juliet', 'kilo', 'lima', 'mike', 'november', 'oscar', 'papa',
@@ -124,6 +132,7 @@ export interface ServerConfig {
   host: string;
   port: number;
   useTLS: boolean;
+  isOpenServer?: boolean;
   certificatePin?: string;
 }
 
