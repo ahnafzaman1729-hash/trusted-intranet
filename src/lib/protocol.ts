@@ -4,6 +4,7 @@ export const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
 export const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const NONCE_SIZE = 24; // XChaCha20-Poly1305
 export const KEY_SIZE = 32;
+export const CONTACT_REQUEST_TTL = 60 * 60 * 1000; // 1 hour
 
 // Open/Demo server configuration for testing
 export const OPEN_SERVER_CONFIG = {
@@ -24,9 +25,12 @@ export const FINGERPRINT_WORDS = [
 export enum MessageType {
   TEXT = 'text',
   FILE = 'file',
+  IMAGE = 'image',
   KEY_EXCHANGE = 'key_exchange',
   RECEIPT = 'receipt',
-  PRESENCE = 'presence'
+  PRESENCE = 'presence',
+  CONTACT_REQUEST = 'contact_request',
+  CONTACT_ACCEPT = 'contact_accept'
 }
 
 export enum MessageStatus {
@@ -116,13 +120,28 @@ export interface Contact {
   online?: boolean;
 }
 
+export interface ContactRequest {
+  id: string;
+  fromUserId: string;
+  fromUsername: string;
+  fromPublicKey: string;
+  fromFingerprint: string;
+  toUserId: string;
+  toUsername: string;
+  createdAt: number;
+  expiresAt: number;
+  status: 'pending' | 'accepted' | 'expired' | 'rejected';
+}
+
 export interface StoredMessage {
   id: string;
   conversationId: string;
   senderId: string;
+  senderUsername?: string;
   receiverId: string;
   type: MessageType;
   content: string;
+  imageData?: string; // Base64 image data for image messages
   timestamp: number;
   status: MessageStatus;
   encrypted: boolean;
