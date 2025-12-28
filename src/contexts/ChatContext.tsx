@@ -58,6 +58,7 @@ interface ChatContextType {
   activeContact: Contact | null;
   connected: boolean;
   serverConfig: ServerConfig | null;
+  publicRoomMessages: StoredMessage[];
   
   // Actions
   createIdentity: (username: string) => Promise<void>;
@@ -67,6 +68,7 @@ interface ChatContextType {
   addContactManual: (username: string, publicKey: string) => Promise<Contact | null>;
   setActiveContact: (contact: Contact | null) => void;
   sendMessage: (content: string) => Promise<void>;
+  sendPublicMessage: (content: string) => Promise<void>;
   verifyContact: (contactId: string) => Promise<void>;
   getFingerprint: (publicKey: string) => string;
   getFingerprintHex: (publicKey: string) => string;
@@ -74,6 +76,10 @@ interface ChatContextType {
 }
 
 const ChatContext = createContext<ChatContextType | null>(null);
+
+// Public room key for open server (derived from a fixed value - everyone has same key)
+const PUBLIC_ROOM_ID = 'public-room';
+const PUBLIC_ROOM_KEY = 'cHVibGljLXJvb20tc2hhcmVkLWtleS1mb3ItZGVtbw=='; // Base64 of shared key
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [initialized, setInitialized] = useState(false);
@@ -83,6 +89,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [activeContact, setActiveContact] = useState<Contact | null>(null);
   const [connected, setConnected] = useState(false);
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
+  const [publicRoomMessages, setPublicRoomMessages] = useState<StoredMessage[]>([]);
   
   const sessionKeys = useRef<Map<string, string>>(new Map());
 
@@ -322,6 +329,36 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return contact;
   }, [identity]);
 
+  // Send message to public room (open server mode)
+  const sendPublicMessage = useCallback(async (content: string) => {
+    if (!identity) return;
+    
+    const storedMessage: StoredMessage = {
+      id: uuidv4(),
+      conversationId: PUBLIC_ROOM_ID,
+      senderId: identity.id,
+      receiverId: PUBLIC_ROOM_ID,
+      type: MessageType.TEXT,
+      content,
+      timestamp: Date.now(),
+      status: MessageStatus.SENT,
+      encrypted: false
+    };
+    
+    // For demo, just store locally - in real app would broadcast
+    await saveMessage(storedMessage);
+    setPublicRoomMessages(prev => [...prev, storedMessage]);
+  }, [identity]);
+
+  // Load public room messages
+  useEffect(() => {
+    if (serverConfig?.isOpenServer && identity) {
+      getMessagesByConversation(PUBLIC_ROOM_ID).then(msgs => {
+        setPublicRoomMessages(msgs);
+      });
+    }
+  }, [serverConfig?.isOpenServer, identity]);
+
   const sendMessage = useCallback(async (content: string) => {
     if (!identity || !activeContact) return;
     
@@ -459,6 +496,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     activeContact,
     connected,
     serverConfig,
+    publicRoomMessages,
     createIdentity,
     configureServer,
     connectToServer,
@@ -466,6 +504,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     addContactManual,
     setActiveContact,
     sendMessage,
+    sendPublicMessage,
     verifyContact,
     getFingerprint,
     getFingerprintHex,
