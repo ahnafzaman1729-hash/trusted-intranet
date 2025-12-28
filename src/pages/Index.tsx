@@ -2,6 +2,7 @@ import { ChatProvider, useChatContext } from '@/contexts/ChatContext';
 import { OnboardingScreen } from '@/components/OnboardingScreen';
 import { ContactList } from '@/components/ContactList';
 import { ChatView } from '@/components/ChatView';
+import { PublicRoomView } from '@/components/PublicRoomView';
 import { Loader2, Shield } from 'lucide-react';
 
 function ChatApp() {
@@ -27,7 +28,16 @@ function ChatApp() {
     return <OnboardingScreen />;
   }
 
-  // Main chat interface
+  // Open server mode - show public room
+  if (serverConfig.isOpenServer) {
+    return (
+      <div className="h-screen flex overflow-hidden bg-background">
+        <PublicRoomView className="flex-1" />
+      </div>
+    );
+  }
+
+  // Main chat interface for custom server
   return (
     <div className="h-screen flex overflow-hidden bg-background">
       <ContactList className="w-80 flex-shrink-0" />

@@ -44,10 +44,12 @@ export function OnboardingScreen() {
     
     try {
       if (serverType === 'open') {
+        // For open server, just configure and we're done (no real connection needed)
         await configureServer({
           ...OPEN_SERVER_CONFIG,
           isOpenServer: true
         });
+        // Skip connecting step for open server - it's local demo mode
       } else {
         if (!host.trim()) {
           setError('Server address is required');
@@ -60,9 +62,9 @@ export function OnboardingScreen() {
           useTLS,
           isOpenServer: false
         });
+        setStep('connecting');
+        await connectToServer();
       }
-      setStep('connecting');
-      await connectToServer();
     } catch (err) {
       setError('Failed to connect to server');
       setStep('server');
