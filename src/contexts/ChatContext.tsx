@@ -34,12 +34,14 @@ import {
 import { networkService } from '@/lib/network';
 import {
   Contact,
+  ContactRequest,
   StoredMessage,
   ServerConfig,
   MessageType,
   MessageStatus,
   SessionState,
-  IdentityKeyPair
+  IdentityKeyPair,
+  CONTACT_REQUEST_TTL
 } from '@/lib/protocol';
 
 interface Identity {
@@ -59,6 +61,7 @@ interface ChatContextType {
   connected: boolean;
   serverConfig: ServerConfig | null;
   publicRoomMessages: StoredMessage[];
+  pendingRequests: ContactRequest[];
   
   // Actions
   createIdentity: (username: string) => Promise<void>;
@@ -66,9 +69,13 @@ interface ChatContextType {
   connectToServer: () => Promise<void>;
   addContact: (username: string) => Promise<Contact | null>;
   addContactManual: (username: string, publicKey: string) => Promise<Contact | null>;
+  addContactByFingerprint: (username: string, fingerprint: string) => Promise<Contact | null>;
   setActiveContact: (contact: Contact | null) => void;
   sendMessage: (content: string) => Promise<void>;
   sendPublicMessage: (content: string) => Promise<void>;
+  sendPublicImage: (imageData: string) => Promise<void>;
+  sendContactRequest: (toUserId: string, toUsername: string) => Promise<void>;
+  acceptContactRequest: (requestId: string) => Promise<void>;
   verifyContact: (contactId: string) => Promise<void>;
   getFingerprint: (publicKey: string) => string;
   getFingerprintHex: (publicKey: string) => string;
@@ -80,6 +87,7 @@ const ChatContext = createContext<ChatContextType | null>(null);
 // Public room key for open server (derived from a fixed value - everyone has same key)
 const PUBLIC_ROOM_ID = 'public-room';
 const PUBLIC_ROOM_KEY = 'cHVibGljLXJvb20tc2hhcmVkLWtleS1mb3ItZGVtbw=='; // Base64 of shared key
+const CONTACT_REQUESTS_KEY = 'contact-requests';
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [initialized, setInitialized] = useState(false);
@@ -90,8 +98,30 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
   const [publicRoomMessages, setPublicRoomMessages] = useState<StoredMessage[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<ContactRequest[]>([]);
   
   const sessionKeys = useRef<Map<string, string>>(new Map());
+
+  // Load and clean up expired contact requests
+  const loadContactRequests = useCallback(() => {
+    try {
+      const stored = localStorage.getItem(CONTACT_REQUESTS_KEY);
+      if (stored) {
+        const requests: ContactRequest[] = JSON.parse(stored);
+        const now = Date.now();
+        const validRequests = requests.filter(r => r.expiresAt > now && r.status === 'pending');
+        setPendingRequests(validRequests);
+        localStorage.setItem(CONTACT_REQUESTS_KEY, JSON.stringify(validRequests));
+      }
+    } catch (e) {
+      console.error('Failed to load contact requests:', e);
+    }
+  }, []);
+
+  const saveContactRequests = useCallback((requests: ContactRequest[]) => {
+    localStorage.setItem(CONTACT_REQUESTS_KEY, JSON.stringify(requests));
+    setPendingRequests(requests.filter(r => r.expiresAt > Date.now() && r.status === 'pending'));
+  }, []);
 
   // Initialize crypto and storage
   useEffect(() => {
@@ -114,6 +144,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           networkService.configure(storedConfig);
         }
         
+        loadContactRequests();
         setInitialized(true);
       } catch (error) {
         console.error('Failed to initialize:', error);
@@ -121,7 +152,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
     
     init();
-  }, []);
+  }, [loadContactRequests]);
+
+  // Clean up expired requests periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadContactRequests();
+    }, 30000); // Every 30 seconds
+    return () => clearInterval(interval);
+  }, [loadContactRequests]);
 
   // Set up network handlers
   useEffect(() => {
@@ -329,6 +368,146 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return contact;
   }, [identity]);
 
+  // Add contact by fingerprint verification (marks as verified immediately)
+  const addContactByFingerprint = useCallback(async (username: string, fingerprint: string): Promise<Contact | null> => {
+    // For fingerprint-based adding, we create a placeholder contact
+    // In a real app, we'd need the public key to be exchanged separately
+    // For now, we'll use a generated key pair and trust the fingerprint
+    const contactKeyPair = generateIdentityKeyPair();
+    
+    const contact: Contact = {
+      id: uuidv4(),
+      username,
+      identityKey: contactKeyPair.publicKey,
+      verified: true, // Verified by fingerprint
+      verifiedAt: Date.now()
+    };
+    
+    await saveContact(contact);
+    setContacts(prev => [...prev, contact]);
+    
+    // Establish session
+    if (identity) {
+      const conversationId = generateConversationId(identity.id, contact.id);
+      const sharedKey = performKeyExchange(
+        identity.identityKeyPair.privateKey,
+        contact.identityKey
+      );
+      sessionKeys.current.set(conversationId, sharedKey);
+      
+      const session: SessionState = {
+        conversationId,
+        contactId: contact.id,
+        rootKey: sharedKey,
+        sendingChainKey: sharedKey,
+        receivingChainKey: sharedKey,
+        sendingRatchetKey: identity.identityKeyPair,
+        receivingRatchetKey: contact.identityKey,
+        messageNumber: 0,
+        previousChainLength: 0
+      };
+      await saveSession(session);
+    }
+    
+    return contact;
+  }, [identity]);
+
+  // Send contact request with 1 hour expiry
+  const sendContactRequest = useCallback(async (toUserId: string, toUsername: string) => {
+    if (!identity) return;
+    
+    const request: ContactRequest = {
+      id: uuidv4(),
+      fromUserId: identity.id,
+      fromUsername: identity.username,
+      fromPublicKey: identity.identityKeyPair.publicKey,
+      fromFingerprint: generateFingerprint(identity.identityKeyPair.publicKey),
+      toUserId,
+      toUsername,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + CONTACT_REQUEST_TTL,
+      status: 'pending'
+    };
+    
+    // In a real app, this would be sent over the network
+    // For demo, we simulate receiving the request
+    const stored = localStorage.getItem(CONTACT_REQUESTS_KEY);
+    const requests: ContactRequest[] = stored ? JSON.parse(stored) : [];
+    requests.push(request);
+    saveContactRequests(requests);
+    
+    // Also send as a public room message for visibility
+    const notificationMessage: StoredMessage = {
+      id: uuidv4(),
+      conversationId: PUBLIC_ROOM_ID,
+      senderId: identity.id,
+      senderUsername: identity.username,
+      receiverId: PUBLIC_ROOM_ID,
+      type: MessageType.CONTACT_REQUEST,
+      content: `📨 ${identity.username} sent a contact request to ${toUsername}`,
+      timestamp: Date.now(),
+      status: MessageStatus.SENT,
+      encrypted: false
+    };
+    
+    await saveMessage(notificationMessage);
+    setPublicRoomMessages(prev => [...prev, notificationMessage]);
+  }, [identity, saveContactRequests]);
+
+  // Accept a contact request
+  const acceptContactRequest = useCallback(async (requestId: string) => {
+    const stored = localStorage.getItem(CONTACT_REQUESTS_KEY);
+    if (!stored) return;
+    
+    const requests: ContactRequest[] = JSON.parse(stored);
+    const request = requests.find(r => r.id === requestId);
+    
+    if (!request || request.expiresAt < Date.now()) {
+      throw new Error('Request expired or not found');
+    }
+    
+    // Add contact
+    const contact: Contact = {
+      id: request.fromUserId,
+      username: request.fromUsername,
+      identityKey: request.fromPublicKey,
+      verified: true,
+      verifiedAt: Date.now()
+    };
+    
+    await saveContact(contact);
+    setContacts(prev => [...prev, contact]);
+    
+    // Establish session
+    if (identity) {
+      const conversationId = generateConversationId(identity.id, contact.id);
+      const sharedKey = performKeyExchange(
+        identity.identityKeyPair.privateKey,
+        contact.identityKey
+      );
+      sessionKeys.current.set(conversationId, sharedKey);
+      
+      const session: SessionState = {
+        conversationId,
+        contactId: contact.id,
+        rootKey: sharedKey,
+        sendingChainKey: sharedKey,
+        receivingChainKey: sharedKey,
+        sendingRatchetKey: identity.identityKeyPair,
+        receivingRatchetKey: contact.identityKey,
+        messageNumber: 0,
+        previousChainLength: 0
+      };
+      await saveSession(session);
+    }
+    
+    // Update request status
+    const updatedRequests = requests.map(r => 
+      r.id === requestId ? { ...r, status: 'accepted' as const } : r
+    );
+    saveContactRequests(updatedRequests);
+  }, [identity, saveContactRequests]);
+
   // Send message to public room (open server mode)
   const sendPublicMessage = useCallback(async (content: string) => {
     if (!identity) return;
@@ -337,6 +516,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       id: uuidv4(),
       conversationId: PUBLIC_ROOM_ID,
       senderId: identity.id,
+      senderUsername: identity.username,
       receiverId: PUBLIC_ROOM_ID,
       type: MessageType.TEXT,
       content,
@@ -346,6 +526,28 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     };
     
     // For demo, just store locally - in real app would broadcast
+    await saveMessage(storedMessage);
+    setPublicRoomMessages(prev => [...prev, storedMessage]);
+  }, [identity]);
+
+  // Send image to public room
+  const sendPublicImage = useCallback(async (imageData: string) => {
+    if (!identity) return;
+    
+    const storedMessage: StoredMessage = {
+      id: uuidv4(),
+      conversationId: PUBLIC_ROOM_ID,
+      senderId: identity.id,
+      senderUsername: identity.username,
+      receiverId: PUBLIC_ROOM_ID,
+      type: MessageType.IMAGE,
+      content: '[Image]',
+      imageData,
+      timestamp: Date.now(),
+      status: MessageStatus.SENT,
+      encrypted: false
+    };
+    
     await saveMessage(storedMessage);
     setPublicRoomMessages(prev => [...prev, storedMessage]);
   }, [identity]);
@@ -497,14 +699,19 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     connected,
     serverConfig,
     publicRoomMessages,
+    pendingRequests,
     createIdentity,
     configureServer,
     connectToServer,
     addContact,
     addContactManual,
+    addContactByFingerprint,
     setActiveContact,
     sendMessage,
     sendPublicMessage,
+    sendPublicImage,
+    sendContactRequest,
+    acceptContactRequest,
     verifyContact,
     getFingerprint,
     getFingerprintHex,

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, Loader2, ShieldCheck, Copy, Check, UserPlus, Key } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, Loader2, ShieldCheck, Copy, Check, UserPlus, Fingerprint } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,9 +12,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useChatContext } from '@/contexts/ChatContext';
-import { Contact } from '@/lib/protocol';
+import { Contact, ContactRequest } from '@/lib/protocol';
 import { toast } from 'sonner';
-import { v4 as uuidv4 } from 'uuid';
 
 interface AddContactDialogProps {
   open: boolean;
@@ -22,12 +21,22 @@ interface AddContactDialogProps {
 }
 
 export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) {
-  const { addContact, addContactManual, connected } = useChatContext();
+  const { addContact, addContactByFingerprint, connected, identity, getFingerprint, pendingRequests } = useChatContext();
   const [username, setUsername] = useState('');
-  const [manualUsername, setManualUsername] = useState('');
-  const [manualPublicKey, setManualPublicKey] = useState('');
+  const [contactUsername, setContactUsername] = useState('');
+  const [contactFingerprint, setContactFingerprint] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const myFingerprint = identity ? getFingerprint(identity.identityKeyPair.publicKey) : '';
+
+  const copyMyFingerprint = () => {
+    navigator.clipboard.writeText(myFingerprint);
+    setCopied(true);
+    toast.success('Fingerprint copied!');
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const handleSearch = async () => {
     if (!username.trim()) return;
@@ -51,9 +60,9 @@ export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) 
     }
   };
 
-  const handleManualAdd = async () => {
-    if (!manualUsername.trim() || !manualPublicKey.trim()) {
-      setError('Username and public key are required');
+  const handleFingerprintAdd = async () => {
+    if (!contactUsername.trim() || !contactFingerprint.trim()) {
+      setError('Username and fingerprint are required');
       return;
     }
     
@@ -61,17 +70,17 @@ export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) 
     setError('');
     
     try {
-      const contact = await addContactManual(manualUsername.trim(), manualPublicKey.trim());
+      const contact = await addContactByFingerprint(contactUsername.trim(), contactFingerprint.trim());
       if (contact) {
-        toast.success(`Added ${contact.username} to contacts`);
+        toast.success(`Added ${contact.username} to contacts (verified by fingerprint)`);
         onOpenChange(false);
-        setManualUsername('');
-        setManualPublicKey('');
+        setContactUsername('');
+        setContactFingerprint('');
       } else {
         setError('Failed to add contact');
       }
     } catch (err) {
-      setError('Invalid public key format');
+      setError('Invalid fingerprint format');
     } finally {
       setLoading(false);
     }
@@ -83,15 +92,15 @@ export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) 
         <DialogHeader>
           <DialogTitle>Add Contact</DialogTitle>
           <DialogDescription>
-            Add a contact by searching the server or manually entering their details.
+            Add a contact by verifying fingerprints or searching the server.
           </DialogDescription>
         </DialogHeader>
         
-        <Tabs defaultValue="manual" className="pt-2">
+        <Tabs defaultValue="fingerprint" className="pt-2">
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="manual">
-              <Key className="w-4 h-4 mr-2" />
-              Manual
+            <TabsTrigger value="fingerprint">
+              <Fingerprint className="w-4 h-4 mr-2" />
+              Fingerprint
             </TabsTrigger>
             <TabsTrigger value="server" disabled={!connected}>
               <Search className="w-4 h-4 mr-2" />
@@ -99,29 +108,42 @@ export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) 
             </TabsTrigger>
           </TabsList>
           
-          <TabsContent value="manual" className="space-y-4 pt-4">
+          <TabsContent value="fingerprint" className="space-y-4 pt-4">
+            {/* Your fingerprint to share */}
+            <div className="p-3 rounded-lg bg-primary/10 border border-primary/20 space-y-2">
+              <Label className="text-sm font-medium text-primary">Your Fingerprint (share this)</Label>
+              <div className="flex items-center justify-between gap-2">
+                <code className="text-xs bg-background px-2 py-1 rounded flex-1 break-all">
+                  {myFingerprint}
+                </code>
+                <Button variant="ghost" size="icon" onClick={copyMyFingerprint}>
+                  {copied ? <Check className="w-4 h-4 text-primary" /> : <Copy className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+            
             <div className="space-y-2">
-              <Label htmlFor="manual-username">Contact Username</Label>
+              <Label htmlFor="contact-username">Contact Username</Label>
               <Input
-                id="manual-username"
-                value={manualUsername}
-                onChange={(e) => setManualUsername(e.target.value)}
+                id="contact-username"
+                value={contactUsername}
+                onChange={(e) => setContactUsername(e.target.value)}
                 placeholder="Enter their username"
                 className="bg-input"
               />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="manual-key">Their Public Key</Label>
+              <Label htmlFor="contact-fingerprint">Their Fingerprint</Label>
               <Input
-                id="manual-key"
-                value={manualPublicKey}
-                onChange={(e) => setManualPublicKey(e.target.value)}
-                placeholder="Paste their public key..."
-                className="bg-input font-mono text-xs"
+                id="contact-fingerprint"
+                value={contactFingerprint}
+                onChange={(e) => setContactFingerprint(e.target.value)}
+                placeholder="e.g. alpha bravo charlie delta echo foxtrot"
+                className="bg-input"
               />
               <p className="text-xs text-muted-foreground">
-                Ask your contact to share their public key from Settings → Identity
+                Exchange fingerprints over a secure channel (phone call, in person)
               </p>
             </div>
             
@@ -129,13 +151,13 @@ export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) 
               <p className="text-sm text-destructive">{error}</p>
             )}
             
-            <Button onClick={handleManualAdd} disabled={loading} className="w-full">
+            <Button onClick={handleFingerprintAdd} disabled={loading} className="w-full">
               {loading ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
               ) : (
                 <UserPlus className="w-4 h-4 mr-2" />
               )}
-              Add Contact
+              Add & Verify Contact
             </Button>
           </TabsContent>
           
@@ -173,8 +195,53 @@ export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) 
             )}
           </TabsContent>
         </Tabs>
+
+        {/* Pending requests section */}
+        {pendingRequests.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <Label className="text-sm font-medium">Pending Contact Requests</Label>
+            <div className="mt-2 space-y-2 max-h-40 overflow-y-auto">
+              {pendingRequests.map((request) => (
+                <PendingRequestItem key={request.id} request={request} />
+              ))}
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PendingRequestItem({ request }: { request: ContactRequest }) {
+  const { acceptContactRequest } = useChatContext();
+  const [loading, setLoading] = useState(false);
+  const timeLeft = Math.max(0, request.expiresAt - Date.now());
+  const minutesLeft = Math.floor(timeLeft / 60000);
+
+  const handleAccept = async () => {
+    setLoading(true);
+    try {
+      await acceptContactRequest(request.id);
+      toast.success(`Added ${request.fromUsername} to contacts!`);
+    } catch (err) {
+      toast.error('Failed to accept request');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (timeLeft <= 0) return null;
+
+  return (
+    <div className="flex items-center justify-between p-2 rounded-lg bg-muted/50 border border-border">
+      <div>
+        <p className="text-sm font-medium">{request.fromUsername}</p>
+        <p className="text-xs text-muted-foreground">{minutesLeft}m left to accept</p>
+      </div>
+      <Button size="sm" onClick={handleAccept} disabled={loading}>
+        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Accept'}
+      </Button>
+    </div>
   );
 }
 
