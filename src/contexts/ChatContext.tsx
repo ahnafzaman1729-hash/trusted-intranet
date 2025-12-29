@@ -43,6 +43,7 @@ import {
   IdentityKeyPair,
   CONTACT_REQUEST_TTL
 } from '@/lib/protocol';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Identity {
   id: string;
@@ -508,57 +509,134 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     saveContactRequests(updatedRequests);
   }, [identity, saveContactRequests]);
 
-  // Send message to public room (open server mode)
+  // Send message to public room (open server mode) - uses database for realtime sync
   const sendPublicMessage = useCallback(async (content: string) => {
     if (!identity) return;
     
-    const storedMessage: StoredMessage = {
-      id: uuidv4(),
-      conversationId: PUBLIC_ROOM_ID,
-      senderId: identity.id,
-      senderUsername: identity.username,
-      receiverId: PUBLIC_ROOM_ID,
-      type: MessageType.TEXT,
-      content,
-      timestamp: Date.now(),
-      status: MessageStatus.SENT,
-      encrypted: false
-    };
-    
-    // For demo, just store locally - in real app would broadcast
-    await saveMessage(storedMessage);
-    setPublicRoomMessages(prev => [...prev, storedMessage]);
+    try {
+      const { error } = await supabase.from('public_room_messages').insert({
+        sender_id: identity.id,
+        sender_username: identity.username,
+        content,
+        message_type: 'TEXT'
+      });
+      
+      if (error) {
+        console.error('Failed to send public message:', error);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Failed to send public message:', error);
+      throw error;
+    }
   }, [identity]);
 
-  // Send image to public room
+  // Send image to public room - uses database for realtime sync
   const sendPublicImage = useCallback(async (imageData: string) => {
     if (!identity) return;
     
-    const storedMessage: StoredMessage = {
-      id: uuidv4(),
-      conversationId: PUBLIC_ROOM_ID,
-      senderId: identity.id,
-      senderUsername: identity.username,
-      receiverId: PUBLIC_ROOM_ID,
-      type: MessageType.IMAGE,
-      content: '[Image]',
-      imageData,
-      timestamp: Date.now(),
-      status: MessageStatus.SENT,
-      encrypted: false
-    };
-    
-    await saveMessage(storedMessage);
-    setPublicRoomMessages(prev => [...prev, storedMessage]);
+    try {
+      const { error } = await supabase.from('public_room_messages').insert({
+        sender_id: identity.id,
+        sender_username: identity.username,
+        content: '[Image]',
+        image_data: imageData,
+        message_type: 'IMAGE'
+      });
+      
+      if (error) {
+        console.error('Failed to send public image:', error);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Failed to send public image:', error);
+      throw error;
+    }
   }, [identity]);
 
-  // Load public room messages
+  // Load public room messages from database and subscribe to realtime updates
   useEffect(() => {
-    if (serverConfig?.isOpenServer && identity) {
-      getMessagesByConversation(PUBLIC_ROOM_ID).then(msgs => {
-        setPublicRoomMessages(msgs);
-      });
-    }
+    if (!serverConfig?.isOpenServer || !identity) return;
+    
+    // Load existing messages from database
+    const loadMessages = async () => {
+      const { data, error } = await supabase
+        .from('public_room_messages')
+        .select('*')
+        .order('created_at', { ascending: true })
+        .limit(100);
+      
+      if (error) {
+        console.error('Failed to load public messages:', error);
+        return;
+      }
+      
+      const messages: StoredMessage[] = (data || []).map(msg => ({
+        id: msg.id,
+        conversationId: PUBLIC_ROOM_ID,
+        senderId: msg.sender_id,
+        senderUsername: msg.sender_username,
+        receiverId: PUBLIC_ROOM_ID,
+        type: msg.message_type === 'IMAGE' ? MessageType.IMAGE : MessageType.TEXT,
+        content: msg.content || '',
+        imageData: msg.image_data || undefined,
+        timestamp: new Date(msg.created_at).getTime(),
+        status: MessageStatus.DELIVERED,
+        encrypted: false
+      }));
+      
+      setPublicRoomMessages(messages);
+    };
+    
+    loadMessages();
+    
+    // Subscribe to realtime updates
+    const channel = supabase
+      .channel('public-room-messages')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'public_room_messages'
+        },
+        (payload) => {
+          const msg = payload.new as {
+            id: string;
+            sender_id: string;
+            sender_username: string;
+            content: string | null;
+            image_data: string | null;
+            message_type: string;
+            created_at: string;
+          };
+          
+          const newMessage: StoredMessage = {
+            id: msg.id,
+            conversationId: PUBLIC_ROOM_ID,
+            senderId: msg.sender_id,
+            senderUsername: msg.sender_username,
+            receiverId: PUBLIC_ROOM_ID,
+            type: msg.message_type === 'IMAGE' ? MessageType.IMAGE : MessageType.TEXT,
+            content: msg.content || '',
+            imageData: msg.image_data || undefined,
+            timestamp: new Date(msg.created_at).getTime(),
+            status: MessageStatus.DELIVERED,
+            encrypted: false
+          };
+          
+          // Avoid duplicates
+          setPublicRoomMessages(prev => {
+            if (prev.some(m => m.id === newMessage.id)) return prev;
+            return [...prev, newMessage];
+          });
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [serverConfig?.isOpenServer, identity]);
 
   const sendMessage = useCallback(async (content: string) => {
