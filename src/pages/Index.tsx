@@ -1,12 +1,15 @@
+import { useState } from 'react';
 import { ChatProvider, useChatContext } from '@/contexts/ChatContext';
 import { OnboardingScreen } from '@/components/OnboardingScreen';
 import { ContactList } from '@/components/ContactList';
 import { ChatView } from '@/components/ChatView';
 import { PublicRoomView } from '@/components/PublicRoomView';
+import { PublicRoomSidebar } from '@/components/PublicRoomSidebar';
 import { Loader2, Shield } from 'lucide-react';
 
 function ChatApp() {
   const { initialized, identity, serverConfig, connected } = useChatContext();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Loading state
   if (!initialized) {
@@ -28,10 +31,14 @@ function ChatApp() {
     return <OnboardingScreen />;
   }
 
-  // Open server mode - show public room
+  // Open server mode - show public room with sidebar
   if (serverConfig.isOpenServer) {
     return (
       <div className="h-screen flex overflow-hidden bg-background">
+        <PublicRoomSidebar 
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
         <PublicRoomView className="flex-1" />
       </div>
     );
