@@ -105,25 +105,39 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   
   const sessionKeys = useRef<Map<string, string>>(new Map());
 
-  // Load and clean up expired contact requests
-  const loadContactRequests = useCallback(() => {
+  // Load and clean up expired contact requests - only show requests TO the current user
+  const loadContactRequests = useCallback((currentIdentity: Identity | null) => {
     try {
       const stored = localStorage.getItem(CONTACT_REQUESTS_KEY);
-      if (stored) {
+      if (stored && currentIdentity) {
         const requests: ContactRequest[] = JSON.parse(stored);
         const now = Date.now();
-        const validRequests = requests.filter(r => r.expiresAt > now && r.status === 'pending');
+        // Filter for valid requests that are addressed TO the current user (not FROM them)
+        const validRequests = requests.filter(r => 
+          r.expiresAt > now && 
+          r.status === 'pending' && 
+          r.toUserId === currentIdentity.id
+        );
         setPendingRequests(validRequests);
-        localStorage.setItem(CONTACT_REQUESTS_KEY, JSON.stringify(validRequests));
+        // Keep all requests in storage but only show relevant ones
+        const allValidRequests = requests.filter(r => r.expiresAt > now);
+        localStorage.setItem(CONTACT_REQUESTS_KEY, JSON.stringify(allValidRequests));
       }
     } catch (e) {
       console.error('Failed to load contact requests:', e);
     }
   }, []);
 
-  const saveContactRequests = useCallback((requests: ContactRequest[]) => {
+  const saveContactRequests = useCallback((requests: ContactRequest[], currentIdentity: Identity | null) => {
     localStorage.setItem(CONTACT_REQUESTS_KEY, JSON.stringify(requests));
-    setPendingRequests(requests.filter(r => r.expiresAt > Date.now() && r.status === 'pending'));
+    // Only show requests TO the current user
+    if (currentIdentity) {
+      setPendingRequests(requests.filter(r => 
+        r.expiresAt > Date.now() && 
+        r.status === 'pending' && 
+        r.toUserId === currentIdentity.id
+      ));
+    }
   }, []);
 
   // Initialize crypto and storage
@@ -147,7 +161,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           networkService.configure(storedConfig);
         }
         
-        loadContactRequests();
+        loadContactRequests(storedIdentity);
         setInitialized(true);
       } catch (error) {
         console.error('Failed to initialize:', error);
@@ -160,10 +174,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   // Clean up expired requests periodically
   useEffect(() => {
     const interval = setInterval(() => {
-      loadContactRequests();
+      loadContactRequests(identity);
     }, 30000); // Every 30 seconds
     return () => clearInterval(interval);
-  }, [loadContactRequests]);
+  }, [loadContactRequests, identity]);
 
   // Set up network handlers
   useEffect(() => {
@@ -446,7 +460,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const stored = localStorage.getItem(CONTACT_REQUESTS_KEY);
     const requests: ContactRequest[] = stored ? JSON.parse(stored) : [];
     requests.push(request);
-    saveContactRequests(requests);
+    saveContactRequests(requests, identity);
     
     // Also send as a public room message for visibility
     const notificationMessage: StoredMessage = {
@@ -517,7 +531,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const updatedRequests = requests.map(r => 
       r.id === requestId ? { ...r, status: 'accepted' as const } : r
     );
-    saveContactRequests(updatedRequests);
+    saveContactRequests(updatedRequests, identity);
     
     return contact;
   }, [identity, saveContactRequests]);
