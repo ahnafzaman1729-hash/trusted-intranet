@@ -48,6 +48,7 @@ import { supabase } from '@/integrations/supabase/client';
 interface Identity {
   id: string;
   username: string;
+  avatar?: string; // Base64 data URL for profile picture
   identityKeyPair: IdentityKeyPair;
   signingKeyPair: { publicKey: string; privateKey: string };
   createdAt: number;
@@ -65,7 +66,8 @@ interface ChatContextType {
   pendingRequests: ContactRequest[];
   
   // Actions
-  createIdentity: (username: string) => Promise<void>;
+  createIdentity: (username: string, avatar?: string) => Promise<void>;
+  updateAvatar: (avatar: string) => Promise<void>;
   configureServer: (config: ServerConfig) => Promise<void>;
   connectToServer: () => Promise<void>;
   addContact: (username: string) => Promise<Contact | null>;
@@ -76,7 +78,7 @@ interface ChatContextType {
   sendPublicMessage: (content: string) => Promise<void>;
   sendPublicImage: (imageData: string) => Promise<void>;
   sendContactRequest: (toUserId: string, toUsername: string) => Promise<void>;
-  acceptContactRequest: (requestId: string) => Promise<void>;
+  acceptContactRequest: (requestId: string) => Promise<Contact>;
   verifyContact: (contactId: string) => Promise<void>;
   getFingerprint: (publicKey: string) => string;
   getFingerprintHex: (publicKey: string) => string;
@@ -244,13 +246,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     processOutbox();
   }, [connected]);
 
-  const createIdentity = useCallback(async (username: string) => {
+  const createIdentity = useCallback(async (username: string, avatar?: string) => {
     const identityKeyPair = generateIdentityKeyPair();
     const signingKeyPair = generateSigningKeyPair();
     
     const newIdentity: Identity = {
       id: uuidv4(),
       username,
+      avatar,
       identityKeyPair,
       signingKeyPair,
       createdAt: Date.now()
@@ -259,6 +262,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     await saveIdentity(newIdentity);
     setIdentity(newIdentity);
   }, []);
+
+  const updateAvatar = useCallback(async (avatar: string) => {
+    if (!identity) return;
+    
+    const updatedIdentity = { ...identity, avatar };
+    await saveIdentity(updatedIdentity);
+    setIdentity(updatedIdentity);
+  }, [identity]);
 
   const configureServer = useCallback(async (config: ServerConfig) => {
     await saveServerConfig(config);
@@ -455,10 +466,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setPublicRoomMessages(prev => [...prev, notificationMessage]);
   }, [identity, saveContactRequests]);
 
-  // Accept a contact request
-  const acceptContactRequest = useCallback(async (requestId: string) => {
+  // Accept a contact request - returns the contact for DM navigation
+  const acceptContactRequest = useCallback(async (requestId: string): Promise<Contact> => {
     const stored = localStorage.getItem(CONTACT_REQUESTS_KEY);
-    if (!stored) return;
+    if (!stored) throw new Error('No requests found');
     
     const requests: ContactRequest[] = JSON.parse(stored);
     const request = requests.find(r => r.id === requestId);
@@ -507,6 +518,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       r.id === requestId ? { ...r, status: 'accepted' as const } : r
     );
     saveContactRequests(updatedRequests);
+    
+    return contact;
   }, [identity, saveContactRequests]);
 
   // Send message to public room (open server mode) - uses database for realtime sync
@@ -779,6 +792,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     publicRoomMessages,
     pendingRequests,
     createIdentity,
+    updateAvatar,
     configureServer,
     connectToServer,
     addContact,

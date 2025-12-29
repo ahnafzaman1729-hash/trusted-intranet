@@ -316,8 +316,9 @@ export function PublicRoomView({ className }: PublicRoomViewProps) {
 }
 
 function PendingRequestBanner({ request }: { request: ContactRequest }) {
-  const { acceptContactRequest, getFingerprint, identity } = useChatContext();
+  const { acceptContactRequest, getFingerprint, identity, setActiveContact, serverConfig } = useChatContext();
   const [loading, setLoading] = useState(false);
+  const [acceptedContact, setAcceptedContact] = useState<{ id: string; username: string; identityKey: string; verified: boolean } | null>(null);
   const [timeLeft, setTimeLeft] = useState(Math.max(0, request.expiresAt - Date.now()));
 
   useEffect(() => {
@@ -333,7 +334,8 @@ function PendingRequestBanner({ request }: { request: ContactRequest }) {
   const handleAccept = async () => {
     setLoading(true);
     try {
-      await acceptContactRequest(request.id);
+      const contact = await acceptContactRequest(request.id);
+      setAcceptedContact(contact);
       toast.success(`Added ${request.fromUsername} to contacts!`);
     } catch (err) {
       toast.error('Failed to accept request');
@@ -342,24 +344,48 @@ function PendingRequestBanner({ request }: { request: ContactRequest }) {
     }
   };
 
-  if (timeLeft <= 0) return null;
+  const handleStartDM = () => {
+    if (acceptedContact) {
+      setActiveContact(acceptedContact);
+      // Navigate away from public room to contacts view
+      if (serverConfig) {
+        // Force a re-render by updating server config to non-open mode temporarily
+        // For now, just set the active contact - user can access via sidebar
+        toast.info(`Select ${acceptedContact.username} from the Contacts section in the sidebar to start messaging.`);
+      }
+    }
+  };
+
+  if (timeLeft <= 0 && !acceptedContact) return null;
 
   return (
     <div className="flex items-center justify-between p-2 rounded-lg bg-background border border-border">
       <div className="flex-1">
         <div className="flex items-center gap-2">
           <span className="font-medium text-sm">{request.fromUsername}</span>
-          <span className="text-xs text-muted-foreground">
-            {minutesLeft}m {secondsLeft}s left
-          </span>
+          {!acceptedContact && (
+            <span className="text-xs text-muted-foreground">
+              {minutesLeft}m {secondsLeft}s left
+            </span>
+          )}
+          {acceptedContact && (
+            <span className="text-xs text-primary font-medium">Added!</span>
+          )}
         </div>
         <p className="text-xs text-muted-foreground truncate">
           Fingerprint: {request.fromFingerprint}
         </p>
       </div>
-      <Button size="sm" onClick={handleAccept} disabled={loading}>
-        {loading ? 'Adding...' : 'Accept'}
-      </Button>
+      {acceptedContact ? (
+        <Button size="sm" onClick={handleStartDM} variant="default">
+          <MessageSquare className="w-3 h-3 mr-1" />
+          Message
+        </Button>
+      ) : (
+        <Button size="sm" onClick={handleAccept} disabled={loading}>
+          {loading ? 'Adding...' : 'Accept'}
+        </Button>
+      )}
     </div>
   );
 }

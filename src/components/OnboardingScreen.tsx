@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Shield, Key, Server, ArrowRight, Loader2, Lock, Globe, Radio } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Shield, Key, Server, ArrowRight, Loader2, Lock, Globe, Radio, Camera, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -7,17 +7,41 @@ import { Switch } from '@/components/ui/switch';
 import { useChatContext } from '@/contexts/ChatContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { OPEN_SERVER_CONFIG } from '@/lib/protocol';
+import { toast } from 'sonner';
 
 export function OnboardingScreen() {
   const { createIdentity, configureServer, connectToServer, identity, serverConfig } = useChatContext();
   const [step, setStep] = useState<'identity' | 'server' | 'connecting'>('identity');
   const [username, setUsername] = useState('');
+  const [avatar, setAvatar] = useState<string | undefined>(undefined);
   const [serverType, setServerType] = useState<'open' | 'custom'>('open');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('8443');
   const [useTLS, setUseTLS] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Image must be less than 2MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAvatar(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleCreateIdentity = async () => {
     if (!username.trim()) {
@@ -29,7 +53,7 @@ export function OnboardingScreen() {
     setError('');
     
     try {
-      await createIdentity(username.trim());
+      await createIdentity(username.trim(), avatar);
       setStep('server');
     } catch (err) {
       setError('Failed to create identity');
@@ -112,6 +136,32 @@ export function OnboardingScreen() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Avatar Upload */}
+              <div className="flex flex-col items-center gap-3">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  onChange={handleAvatarUpload}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="relative w-20 h-20 rounded-full bg-muted border-2 border-dashed border-border hover:border-primary/50 transition-colors flex items-center justify-center overflow-hidden group"
+                >
+                  {avatar ? (
+                    <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
+                  )}
+                  <div className="absolute inset-0 bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <Camera className="w-5 h-5 text-primary" />
+                  </div>
+                </button>
+                <p className="text-xs text-muted-foreground">Add profile picture (optional)</p>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>
                 <Input
