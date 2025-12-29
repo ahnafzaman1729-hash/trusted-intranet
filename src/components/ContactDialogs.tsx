@@ -213,15 +213,17 @@ export function AddContactDialog({ open, onOpenChange }: AddContactDialogProps) 
 }
 
 function PendingRequestItem({ request }: { request: ContactRequest }) {
-  const { acceptContactRequest } = useChatContext();
+  const { acceptContactRequest, setActiveContact } = useChatContext();
   const [loading, setLoading] = useState(false);
+  const [acceptedContact, setAcceptedContact] = useState<{ id: string; username: string; identityKey: string; verified: boolean } | null>(null);
   const timeLeft = Math.max(0, request.expiresAt - Date.now());
   const minutesLeft = Math.floor(timeLeft / 60000);
 
   const handleAccept = async () => {
     setLoading(true);
     try {
-      await acceptContactRequest(request.id);
+      const contact = await acceptContactRequest(request.id);
+      setAcceptedContact(contact);
       toast.success(`Added ${request.fromUsername} to contacts!`);
     } catch (err) {
       toast.error('Failed to accept request');
@@ -230,17 +232,34 @@ function PendingRequestItem({ request }: { request: ContactRequest }) {
     }
   };
 
-  if (timeLeft <= 0) return null;
+  const handleStartDM = () => {
+    if (acceptedContact) {
+      setActiveContact(acceptedContact);
+    }
+  };
+
+  if (timeLeft <= 0 && !acceptedContact) return null;
 
   return (
     <div className="flex items-center justify-between p-2 rounded-lg bg-muted/50 border border-border">
       <div>
         <p className="text-sm font-medium">{request.fromUsername}</p>
-        <p className="text-xs text-muted-foreground">{minutesLeft}m left to accept</p>
+        {!acceptedContact && (
+          <p className="text-xs text-muted-foreground">{minutesLeft}m left to accept</p>
+        )}
+        {acceptedContact && (
+          <p className="text-xs text-primary">Contact added!</p>
+        )}
       </div>
-      <Button size="sm" onClick={handleAccept} disabled={loading}>
-        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Accept'}
-      </Button>
+      {acceptedContact ? (
+        <Button size="sm" onClick={handleStartDM}>
+          Message
+        </Button>
+      ) : (
+        <Button size="sm" onClick={handleAccept} disabled={loading}>
+          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Accept'}
+        </Button>
+      )}
     </div>
   );
 }

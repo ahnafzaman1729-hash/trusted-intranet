@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Settings, Key, Server, Copy, Check, Shield, Trash2, Globe, Radio } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Settings, Key, Server, Copy, Check, Shield, Trash2, Globe, Radio, Camera, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,13 +32,14 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const { identity, serverConfig, configureServer, getFingerprint, getFingerprintHex } = useChatContext();
+  const { identity, serverConfig, configureServer, getFingerprint, getFingerprintHex, updateAvatar } = useChatContext();
   const [serverType, setServerType] = useState<'open' | 'custom'>(serverConfig?.isOpenServer ? 'open' : 'custom');
   const [host, setHost] = useState(serverConfig?.host || '');
   const [port, setPort] = useState(serverConfig?.port?.toString() || '8443');
   const [useTLS, setUseTLS] = useState(serverConfig?.useTLS ?? true);
   const [copied, setCopied] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (serverConfig) {
@@ -56,6 +57,28 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     await navigator.clipboard.writeText(fingerprint);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Image must be less than 2MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      await updateAvatar(reader.result as string);
+      toast.success('Profile picture updated!');
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSaveServer = async () => {
@@ -105,6 +128,32 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <TabsContent value="identity" className="space-y-4 pt-4">
               {identity ? (
                 <>
+                  {/* Profile Picture */}
+                  <div className="flex flex-col items-center gap-3">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handleAvatarUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="relative w-20 h-20 rounded-full bg-muted border-2 border-border hover:border-primary/50 transition-colors flex items-center justify-center overflow-hidden group"
+                    >
+                      {identity.avatar ? (
+                        <img src={identity.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                      ) : (
+                        <User className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
+                      )}
+                      <div className="absolute inset-0 bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <Camera className="w-5 h-5 text-primary" />
+                      </div>
+                    </button>
+                    <p className="text-xs text-muted-foreground">Click to change profile picture</p>
+                  </div>
+
                   <div className="space-y-2">
                     <Label className="text-muted-foreground">Username</Label>
                     <div className="p-3 rounded-lg bg-muted font-mono">
